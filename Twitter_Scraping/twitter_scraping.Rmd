@@ -1,0 +1,367 @@
+---
+title: "Assessment1"
+author: "Corinne Batho-Newton"
+date: "25/01/2021"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+library(ROAuth)
+library("quanteda")
+library("readtext")
+library (streamR)
+library(twitteR)
+library(readr)
+library(dplyr)
+library("lubridate")
+library("zoo")
+require(quanteda)
+require(readtext)
+require(quanteda.corpora)
+require(seededlda)
+require(lubridate)
+require(RColorBrewer)
+require(dplyr)
+require(ggplot2)
+require(stm)
+
+```
+
+**-       Scraping tweets        -**
+The last 3200 tweets from Stephen Morgan and Royston Smith
+
+```{r}
+# # Stephen Morgan
+# SM_tweets <- get_timelines(c("StephenMorganMP"), n = 3200, parse=T, token=my_oauth)
+# 
+# save_as_csv(SM_tweets, "SMorganMP.csv", prepend_ids = TRUE, na = "", fileEncoding = "UTF-8")
+# 
+# 
+# # Royston Smith
+# RS_tweets <- get_timelines(c("Royston_Smith"), n = 3200, parse=T, token=my_oauth)
+# 
+# save_as_csv(RS_tweets, "RSmithMP.csv", prepend_ids = TRUE, na = "", fileEncoding = "UTF-8")
+
+```
+
+**-       Setup Corpus'       -**
+```{r}
+MorganTweets <- read.csv("SMorganMP.csv")
+SmithTweets <- read.csv("RSmithMP.csv")
+MorganTexts <- readtext("SMorganMP.csv", text_field = "text")
+SmithTexts <- readtext("RSmithMP.csv", text_field = "text")
+
+SMorganCorpus <- corpus(MorganTexts)
+RSmithCorpus <- corpus(SmithTexts)
+
+```
+
+**-       Cleaning        -**
+
+Removing meta data from Stephen Morgan
+```{r}
+SMorganCorpus$retweets<-docvars(SMorganCorpus, "retweet_count")
+
+library("lubridate")
+Sys.setlocale("LC_TIME", "en_UK.UTF-8")
+SMorganCorpus$date_time <- docvars(SMorganCorpus, "created_at")
+SMorganCorpus$time <- as.POSIXct(SMorganCorpus$date_time, tz = "UTC", format = "%a
+%b %d %H:%M:%S %z %Y")
+
+SMorganCorpus$date <- as.Date(SMorganCorpus$time)
+SMorganCorpus$month <- as.numeric(format(SMorganCorpus$date, format="%m"))
+SMorganCorpus$year <- as.numeric(format(SMorganCorpus$date, format="%Y"))
+
+library("zoo")
+SMorganCorpus$yr_m <- as.yearmon(paste(SMorganCorpus$year, SMorganCorpus$month), "%Y %m")
+
+
+```
+
+Removing meta data from Royston Smith
+```{r}
+RSmithCorpus$retweets<-docvars(RSmithCorpus, "retweet_count")
+
+library("lubridate")
+Sys.setlocale("LC_TIME", "en_UK.UTF-8")
+RSmithCorpus$date_time <- docvars(RSmithCorpus, "created_at")
+RSmithCorpus$time <- as.POSIXct(RSmithCorpus$date_time, tz = "UTC", format = "%a
+%b %d %H:%M:%S %z %Y")
+
+RSmithCorpus$date <- as.Date(RSmithCorpus$time)
+RSmithCorpus$month <- as.numeric(format(RSmithCorpus$date, format="%m"))
+RSmithCorpus$year <- as.numeric(format(RSmithCorpus$date, format="%Y"))
+
+library("zoo")
+RSmithCorpus$yr_m <- as.yearmon(paste(RSmithCorpus$year, RSmithCorpus$month), "%Y %m")
+```
+
+**-       Summary       -**
+
+Smith - longest tweet
+```{r}
+tokeninfoRS <- summary(RSmithCorpus, n=12916)
+write.csv(tokeninfoRS, file="tokeninfoRS.csv", row.names=FALSE)
+longesttweet <- tokeninfoRS[which.max(tokeninfoRS$Tokens), ]
+texts(RSmithCorpus)[1453]
+```
+Morgan
+```{r}
+tokeninfoSM <- summary(SMorganCorpus, n=12916)
+write.csv(tokeninfoSM, file="tokeninfoRS.csv", row.names=FALSE)
+longesttweet <- tokeninfoSM[which.max(tokeninfoSM$Tokens), ]
+texts(SMorganCorpus)[longesttweet[1,1]]
+```
+
+#  Comparing Proflic-ness by date
+```{r fig.show='hide'}
+library(dplyr)
+
+tokeninfocollapsed <- tokeninfoRS %>%
+  group_by(yr_m)%>%
+  summarize(sum(Tokens)) %>%
+  rename (Tokens = `sum(Tokens)`)
+
+if (require(ggplot2)) ggplot(data = tokeninfocollapsed, aes(x = yr_m, y = Tokens)) +
+  geom_line() + geom_point() + theme_bw()
+```
+
+Key-words in context - comparing use of tweets containing "covid"
+```{r}
+covidtweetsRS <- kwic(RSmithCorpus, pattern = "*covid*", window = 3)
+covidtweetsSM <- kwic(SMorganCorpus, pattern = "*covid*", window = 3)
+
+write.csv(covidtweetsRS, file="covidtweetsRS.csv")
+write.csv(covidtweetsSM, file="covidtweetsSM.csv")
+
+ kwic(RSmithCorpus, pattern = "*covid*", window = 3)
+ kwic(SMorganCorpus, pattern = "*covid*", window = 3)
+```
+
+Converting to dfm
+```{r}
+dfmSmith <- dfm(RSmithCorpus)
+dfmSmith
+dfmMorgan<- dfm(SMorganCorpus)
+dfmMorgan
+
+#top features of each
+# topfeatures(dfmSmith, 10)
+
+dfmSmith_trimmed<- dfm(RSmithCorpus, remove = c(stopwords("english"),"rt", "@*", "+",
+                                               "<","u",">","€","™","s" ,"0001f3fb", 
+                                               "0001f3fb", "*â*","0001f447", "t" ),
+                       stem = TRUE, remove_punct = TRUE, tolower=T, 
+                       remove_symbols = T, remove_numbers = T, remove_url = T)
+
+# topfeatures(dfmSmith_trimmed, 50)
+
+dfmMorgan_trimmed<- dfm(SMorganCorpus, remove = c(stopwords("english"), 
+                                              "rt","@*","+","<","u",">","€","™",
+                                               "s","0001f3fb","0001f3fb","*â*",
+                                               "0001f447", "iâ" ),
+    stem = TRUE, remove_punct = TRUE, tolower=T, remove_symbols = T, 
+    remove_numbers = T, remove_url = T)
+
+# topfeatures(dfmMorgan_trimmed, 50)
+```
+
+term frequency - Inverse Document Frequency Weighting
+```{r}
+dfmMorgan_tfidf<- SMorganCorpus %>%
+  dfm(remove = c(stopwords("english"),"rt","@","rt", "@*", "+", "<", "u", ">", "€", 
+                 "™", "s","0001f3fb", "0001f3fb", "*â*","0001f447", "t"), 
+      stem = TRUE, remove_punct = TRUE, tolower=T) %>%
+  dfm_tfidf( scheme_tf = "count", scheme_df = "inverse",base = 10)
+
+dfmSmith_tfidf<- RSmithCorpus %>%
+  dfm(remove = c(stopwords("english"),"rt","@","rt", "@*", "+", "<", "u", ">", "€", 
+                 "™", "s","0001f3fb", "0001f3fb", "*â*","0001f447", "t"), 
+      stem = TRUE, remove_punct = TRUE, tolower=T) %>%
+  dfm_tfidf( scheme_tf = "count", scheme_df = "inverse",base = 10) 
+
+
+```
+
+##  Wordclouds
+```{r}
+# textplot_wordcloud(dfmMorgan_tfidf, min_count = 6, random_order = FALSE, rotation = 0.25,
+#     color = RColorBrewer::brewer.pal(8, "Dark2"))
+# 
+# textplot_wordcloud(dfmSmith_tfidf, min_count = 6, random_order = FALSE, rotation = 0.25,
+#     color = RColorBrewer::brewer.pal(8, "Dark2"))
+
+```
+
+
+Creating master corpus dfm
+```{r}
+MasterCorpus <- RSmithCorpus+SMorganCorpus
+
+MasterCorpus$author<-docvars(MasterCorpus, "screen_name")
+
+dfm_Master<- MasterCorpus %>%
+  dfm(remove = c(stopwords("english"),"rt", "@*", "+","<","u",">","€","™","s" 
+                 ,"0001f3fb","0001f3fb", "*â*","0001f447", "t"), 
+      stem = TRUE, 
+      remove_punct = TRUE, tolower=T) %>%
+      dfm_group(groups = "author") %>%
+      dfm_weight(scheme = "prop")
+
+write.csv(convert(dfm_Master, to="data.frame"), file="dfm_group.csv", row.names=FALSE)
+```
+Plot word frequency comparison
+
+```{r}
+dfm_Master_Grouped<-dfm_sort(dfm_Master)
+
+dfm_Master_Grouped2<-textstat_frequency(
+  dfm_Master,
+  n = 30,
+  groups = "author")
+
+#plot for comparison (using dfm with top 20th ranked words only)
+
+ggplot(data = dfm_Master_Grouped2, aes(x = factor(nrow(dfm_Master_Grouped2):1), y = frequency)) +
+    geom_point() +
+    facet_wrap(~ group, scales = "free") +
+    coord_flip() +
+    scale_x_discrete(breaks = nrow(dfm_Master_Grouped2):1,
+                       labels = dfm_Master_Grouped2$feature) +
+    labs(x = NULL, y = "Relative frequency")
+
+```
+
+##      Text analysis - Topic modelling
+
+LDA probabilistic model
+```{r}
+# tmod_ldaMS <- textmodel_lda(dfmMorgan_tfidf, k = 10)
+# tmod_ldaRS <- textmodel_lda(dfmSmith_tfidf, k = 10)
+```
+ Morgan top 20
+```{r}
+# seededlda::terms(tmod_ldaMS, 20)
+```
+Royston top 20
+```{r}
+# seededlda::terms(tmod_ldaRS, 20)
+```
+
+Further Cleaning & Stemming
+```{r}
+dfmMorgan_tfidf_stem<- dfm(SMorganCorpus, 
+                           remove = c(stopwords("english"),"rt", "@*", "+", "<", "u",
+                                      ">", "€","™","s", "0001f3fb", "0001f3fb",
+                                      "*â*","0001f447", "t","0*"), 
+                           stem=T,
+  remove_punct = TRUE, remove_numbers = TRUE, remove_symbol = TRUE,tolower=T) %>% 
+  dfm_tfidf(scheme_tf = "count", scheme_df = "inverse",base = 10) 
+
+dfmSmith_tfidf_stem<- dfm(RSmithCorpus, 
+                           remove = c(stopwords("english"),"rt", "@*", "+", "<", "u",
+                                      ">", "€","™","s", "0001f3fb", "0001f3fb",
+                                      "*â*","0001f447", "t","0*","fe0f"), 
+                           stem=T,
+  remove_punct = TRUE, remove_numbers = TRUE, remove_symbol = TRUE,tolower=T) %>% 
+  dfm_tfidf(scheme_tf = "count", scheme_df = "inverse",base = 10) 
+```
+
+Re-apply model
+```{r}
+require(quanteda)
+require(readtext)
+require(quanteda.corpora)
+require(seededlda)
+require(lubridate)
+require(RColorBrewer)
+require(dplyr)
+require(ggplot2)
+require(stm)
+tmod_ldaMS <- textmodel_lda(dfmMorgan_tfidf_stem, k = 12)
+tmod_ldaRS <- textmodel_lda(dfmSmith_tfidf_stem, k = 9)
+```
+
+csv table
+```{r}
+topwords<-as.data.frame(seededlda::terms(tmod_ldaMS, 20))
+write.csv(topwords, file="top_wordsSM.csv")
+# View(topwords)
+
+
+topwords<-as.data.frame(seededlda::terms(tmod_ldaRS, 20))
+write.csv(topwords, file="top_wordsRS.csv")
+# View(topwords)
+```
+
+
+
+```{r}
+
+
+MorganTweets$topic <- seededlda::topics(tmod_ldaMS)
+View(MorganTweets[,c(5,91)])
+
+SmithTweets$topic <- seededlda::topics(tmod_ldaRS)
+View(SmithTweets[,c(5,91)])
+
+#attach the topic variable to the corpus object as well:
+SMorganCorpus$topic <- seededlda::topics(tmod_ldaMS)
+RSmithCorpus$topic <- seededlda::topics(tmod_ldaRS)
+
+topics_tableM<-ftable(MorganTweets$topic)
+# View(topics_tableM)
+topicsprop_tableM<-as.data.frame(prop.table(topics_tableM))
+# View(topicsprop_tableM)
+
+topics_tableS<-ftable(SmithTweets$topic)
+# View(topics_tableS)
+topicsprop_tableS<-as.data.frame(prop.table(topics_tableS))
+# View(topicsprop_tableS)
+
+
+#visualise the topic frequencies
+
+ggplot(data=topicsprop_tableM, aes(x=Var1, y=Freq)) + 
+  geom_bar(stat = "identity") +
+  theme_classic()+
+  labs (x= "Topics", y = "Topic %")+
+  labs(title = "Topic proportions - Stephen Morgan") +
+  scale_x_discrete(labels=c("topic1" = "1 Local Issues", "topic2" = "2 Goverment Spending",
+                            "topic3" = "3 Royal Navy", 
+                            "topic4" = "4 Defense", "topic5"="5 Local Community",
+                            "topic6" = "6 Healthcare", "topic7" = "7 Goverment Policies", 
+                            "topic8" = "8 Green Campaigns", 
+                            "topic9"="9 Social Inequality", 
+                            "topic10" = "10 Election Campaings","topic11"="11 Schools",
+                            "topic12" = "12 Local Support")) +
+  theme(axis.text.x = element_text(face="bold", 
+                           size=10, angle=45,hjust = 1)) +
+  theme(text=element_text(size=12,  family="serif")) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggplot(data=topicsprop_tableS, aes(x=Var1, y=Freq)) + 
+  geom_bar(stat = "identity") +
+  theme_classic()+
+  labs (x= "Topics", y = "Topic %")+
+  labs(title = "Topic proportions - Royston Smith") +
+  scale_x_discrete(labels=c("topic1" = "1 Brexit", "topic2" = "2 RAF", "topic3" = "3 Local Areas", 
+                            "topic4" = "4 Expressions of appreciation", "topic5"="5 Current breifings",
+                            "topic6" = "6 Achievements", "topic7"="7 Local Issues",
+                            "topic8" = "8 Southampton Council", "topic9"="9 Healthcare")) +
+  theme(axis.text.x = element_text(face="bold", 
+                           size=10, angle=45,hjust = 1)) +
+  theme(text=element_text(size=12,  family="serif")) +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+texts(SMorganCorpus)[28]
+texts(SMorganCorpus)[696]
+```
+
+```{r}
+texts(RSmithCorpus)[33]
+texts(RSmithCorpus)[59]
+```
+
